@@ -1,0 +1,38 @@
+name: Feature Pipeline (Hourly)
+
+on:
+  schedule:
+    - cron: "5 * * * *"   # 5 minutes past every hour, UTC
+  workflow_dispatch: {}    # lets you trigger a run manually from the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  run-feature-pipeline:
+    runs-on: ubuntu-latest
+    env:
+      CITY_NAME: ${{ vars.CITY_NAME }}
+      LATITUDE: ${{ vars.LATITUDE }}
+      LONGITUDE: ${{ vars.LONGITUDE }}
+      AQICN_CITY_SLUG: ${{ vars.AQICN_CITY_SLUG }}
+      AQICN_API_TOKEN: ${{ secrets.AQICN_API_TOKEN }}
+      OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+      USE_HOPSWORKS: ${{ vars.USE_HOPSWORKS }}
+      HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+      HOPSWORKS_PROJECT_NAME: ${{ vars.HOPSWORKS_PROJECT_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-feature.txt
+
+      - name: Run feature pipeline
+        run: python -m src.pipelines.feature_pipeline
+
+      # Save local parquet files back into the repo if needed.

@@ -1,0 +1,41 @@
+name: Training Pipeline (Daily)
+
+on:
+  schedule:
+    - cron: "30 2 * * *"  # 02:30 UTC daily — well after a day's worth of hourly readings has landed
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    env:
+      CITY_NAME: ${{ vars.CITY_NAME }}
+      LATITUDE: ${{ vars.LATITUDE }}
+      LONGITUDE: ${{ vars.LONGITUDE }}
+      AQICN_CITY_SLUG: ${{ vars.AQICN_CITY_SLUG }}
+      AQICN_API_TOKEN: ${{ secrets.AQICN_API_TOKEN }}
+      OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+      USE_HOPSWORKS: ${{ vars.USE_HOPSWORKS }}
+      HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+      HOPSWORKS_PROJECT_NAME: ${{ vars.HOPSWORKS_PROJECT_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-train.txt
+
+      - name: Rebuild daily feature table
+        run: python -m src.pipelines.daily_aggregation
+
+      - name: Train + register models
+        run: python -m src.pipelines.training_pipeline
+
+      # Save local model and feature files if using local storage.
