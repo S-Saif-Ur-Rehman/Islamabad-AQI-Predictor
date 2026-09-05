@@ -20,7 +20,7 @@ jobs:
       OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
       USE_HOPSWORKS: ${{ vars.USE_HOPSWORKS }}
       HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
-      HOPSWORKS_PROJECT_NAME: ${{ vars.HOPSWORKS_PROJECT_NAME }}
+      HOPSWORKS_PROJECT_NAME: ${{ secrets.HOPSWORKS_PROJECT_NAME }}
     steps:
       - uses: actions/checkout@v4
 
