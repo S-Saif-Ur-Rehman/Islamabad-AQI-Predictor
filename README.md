@@ -27,8 +27,10 @@ OpenWeather API ▶│  (hourly, GH       │        │ (local parquet, or    �
                                                  ┌──────────▼───────────┐
                                                  │  Training Pipeline    │
                                                  │  (daily, GH Actions)  │
-                                                 │  RF / Ridge / TF MLP  │
-                                                 │  → Model Registry     │
+                                                 │  Baseline / Ridge /   │
+                                                 │  RF / TF MLP → via    │
+                                                 │  Feature View →       │
+                                                 │  Model Registry       │
                                                  └──────────┬───────────┘
                                                             │
                                                  ┌──────────▼───────────┐
@@ -38,6 +40,7 @@ OpenWeather API ▶│  (hourly, GH       │        │ (local parquet, or    �
                                                             │
                                                  ┌──────────▼───────────┐
                                                  │  Streamlit Dashboard  │
+                                                 │  (+ Flask API, local) │
                                                  └───────────────────────┘
 ```
 
@@ -47,12 +50,14 @@ with two implementations each:
 
 | | No account needed (default) | Hopsworks |
 |---|---|---|
-| Feature store | `data/local_store/*.parquet` | Hopsworks Feature Groups |
+| Feature store | `data/local_store/*.parquet` | Hopsworks Feature Groups + a Feature View for training |
 | Model registry | `models_registry/*` (joblib/keras + JSON metadata) | Hopsworks Model Registry |
 
-Flip `USE_HOPSWORKS=true` in `.env` (and fill in `HOPSWORKS_API_KEY` /
-`HOPSWORKS_PROJECT_NAME`) whenever you're ready — no other code changes
-needed. Get a free account at https://app.hopsworks.ai.
+This project actually runs against Hopsworks — `USE_HOPSWORKS=true` in the real `.env`, feature
+groups populated with two years of Islamabad data, models trained and registered there. The
+local backend still works fine on its own if you'd rather not set up an account before poking
+around: flip `USE_HOPSWORKS=false` and everything runs against parquet files on disk instead, no
+code changes needed either way. Hopsworks itself is free at https://app.hopsworks.ai.
 
 ## Data sources
 
@@ -88,12 +93,16 @@ cd aqi-predictor
 source .venv/bin/activate
 ```
 
+`setup_local_dev.sh` installs both `requirements.txt` and `dashboard/requirements.txt` plus
+pytest — the project's dependencies are split by deployment target (see below), so full local
+dev needs both files together.
+
 Edit `.env`:
 - `CITY_NAME` / `LATITUDE` / `LONGITUDE` / `AQICN_CITY_SLUG` already default to
   **Islamabad, Pakistan** (AQICN station: `pakistan/islamabad/us-embassy`).
   Change these if you want a different city.
 - Add your `AQICN_API_TOKEN` and `OPENWEATHER_API_KEY`.
-- Leave `USE_HOPSWORKS=false` for now — come back to this later.
+- Leave `USE_HOPSWORKS=false` if you're just trying things out locally.
 
 Run everything once, end to end:
 
@@ -118,8 +127,9 @@ python -m src.pipelines.inference_pipeline      # prints the forecast as JSON
 pytest tests/ -v
 ```
 
-Covers the EPA AQI calculator and the feature engineering functions
-(pure functions, no API calls needed — safe to run anywhere, anytime).
+Covers the EPA AQI calculator, the feature engineering functions, and the Flask API — pure
+functions plus a couple of endpoint tests, no live AQICN/OpenWeather calls required for most of
+the suite.
 
 ## Flask API
 
@@ -129,7 +139,12 @@ Alongside the Streamlit dashboard, a small Flask API exposes the same forecast a
 python -m api.app
 curl http://localhost:5000/health
 curl http://localhost:5000/forecast
+curl http://localhost:5000/history
 ```
+
+Set `API_AUTH_TOKEN` in `.env` to require an `X-API-Key` header on `/forecast` and `/history` —
+leave it unset and the API stays open, which is fine for local use but worth turning on before
+exposing this anywhere public.
 
 ## Filling in the report's results table
 
@@ -145,8 +160,7 @@ Paste its output into the Results section of `REPORT.md`.
 
 1. Push this repo to GitHub.
 2. Repo **Settings → Secrets and variables → Actions**:
-   - **Secrets**: `AQICN_API_TOKEN`, `OPENWEATHER_API_KEY`, and (once you
-     have them) `HOPSWORKS_API_KEY`.
+   - **Secrets**: `AQICN_API_TOKEN`, `OPENWEATHER_API_KEY`, and `HOPSWORKS_API_KEY`.
    - **Variables**: `CITY_NAME`, `LATITUDE`, `LONGITUDE`, `AQICN_CITY_SLUG`,
      `USE_HOPSWORKS` (`true`/`false`), `HOPSWORKS_PROJECT_NAME`.
 3. That's it — `.github/workflows/feature_pipeline.yml` runs hourly and
@@ -156,19 +170,32 @@ Paste its output into the Results section of `REPORT.md`.
 While `USE_HOPSWORKS=false`, both workflows commit the updated
 `data/local_store/` / `models_registry/` files back into the repo after
 each run — that's how state survives between otherwise-stateless Actions
-runs. Once Hopsworks is enabled, storage lives there instead and those
-commit-back steps simply become no-ops.
+runs. With Hopsworks enabled (the actual setup here), storage lives there
+instead and those commit-back steps are no-ops.
 
-## Deploying the dashboard
+## Deploying this
 
-Push to GitHub, then deploy for free on
-[Streamlit Community Cloud](https://streamlit.io/cloud): point it at
-`dashboard/app.py` and paste the same `.env` values into the app's
-**Secrets** panel (Streamlit reads `st.secrets`, which `python-dotenv`
-falls back to automatically once you also set them as real environment
-variables in the deploy config — or simply add
-`os.environ.update(st.secrets)` at the top of `dashboard/app.py` if you'd
-rather not duplicate values).
+The dashboard deploys on its own — no separate backend to stand up. `dashboard/app.py` already
+knows how to run inference in-process (read Hopsworks, load the model, compute SHAP) whenever no
+`API_URL` is configured, which is exactly what you want for a single free deployment. Push to
+GitHub, create a new app on [Streamlit Community Cloud](https://streamlit.io/cloud) pointed at
+`dashboard/app.py`, and paste the Hopsworks/city values from `.env` into its Secrets panel —
+`dashboard/requirements.txt` (co-located with the entrypoint, so Streamlit Cloud picks it up
+automatically instead of the root `requirements.txt`) has everything the dashboard needs on its
+own, including a working fallback to reading Hopsworks directly if you ever do point it at a
+separate API and that call fails.
+
+We looked at also hosting `api/app.py` publicly — Streamlit as a thin client, Flask doing the
+actual work behind it — and the dashboard already supports that mode too, via an `API_URL`
+secret. Render was the natural host for it (an always-on process, no execution-time limit, which
+matches `gunicorn` cleanly), but its free tier started asking for a credit card partway through
+setting this up. Vercel doesn't need one, but its free functions cap out at 10 seconds by
+default, and `/forecast` — which computes SHAP explanations live for all three horizons — took
+about 20 seconds in testing. It would time out far more often than it would succeed, so we left
+it alone rather than ship something that fails most of the time. The real fix, if a live,
+separately-hosted API turns out to matter more later, is to precompute SHAP once during the
+daily training run instead of on every request; `api/app.py` runs fine locally in the meantime
+(`python -m api.app`), fully tested, just not sitting on a public URL.
 
 ## Project structure
 
@@ -177,18 +204,20 @@ REPORT.md                          # detailed project report (submission deliver
 config/config.py                   # all settings, read from env vars
 src/clients/                       # AQICN, OpenWeather, Open-Meteo API clients
 src/features/                      # feature engineering + EPA AQI calculator
-src/feature_store/                 # local + Hopsworks feature store backends
+src/feature_store/                 # local + Hopsworks feature store backends (Hopsworks incl. Feature View)
 src/models/                        # model registry, SHAP explainability, persistence baseline
+src/utils/                         # alerts, logging, error sanitization
 src/pipelines/
   feature_pipeline.py               # hourly: fetch + write one raw row
   backfill_pipeline.py              # historical backfill (argparse: --days)
   daily_aggregation.py              # raw hourly -> daily features + targets
   training_pipeline.py              # baseline / Ridge / RF / TF MLP per horizon, picks best
   inference_pipeline.py             # latest features -> 3-day forecast + SHAP
-dashboard/app.py                   # Streamlit UI
-api/app.py                         # Flask REST API (/health, /forecast)
+dashboard/app.py                   # Streamlit UI (in-process inference, or proxies to api/app.py)
+dashboard/requirements.txt         # dashboard-only deps, picked up by Streamlit Cloud automatically
+api/app.py                         # Flask REST API (/health, /forecast, /history)
 .github/workflows/                 # hourly + daily automation
-tests/                             # unit tests for pure-function modules
+tests/                             # unit tests + API tests
 scripts/                           # local dev convenience scripts + report metrics generator
 ```
 
@@ -201,7 +230,7 @@ scripts/                           # local dev convenience scripts + report metr
 - **Alerts via email/Slack**: `src/utils/alerts.py` already computes
   whether a hazard threshold is breached — wire its output into a
   notification call at the end of `inference_pipeline.run()`.
-- **Flask/FastAPI API layer**: if you want predictions served over HTTP
-  (rather than only inside the Streamlit process), wrap
-  `inference_pipeline.run()` in a single Flask route — `flask` is already
-  in `requirements.txt` for this.
+- **Hosting the Flask API publicly**: see the deployment note above — move SHAP computation into
+  the training run and store the result alongside the model instead of computing it live on
+  every request. That alone should bring `/forecast` well under a 10-second budget, which opens
+  up hosts like Vercel that a long-running `gunicorn` process doesn't fit today.
