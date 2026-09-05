@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import requests
 import streamlit as st
 
 # Load secrets into env vars for the app config.
@@ -27,21 +26,10 @@ from config import config
 from src.feature_store.base import get_feature_store
 from src.utils.error_handling import sanitize_exception_message
 
-# Use the API when it is configured. Otherwise run local inference.
-API_URL = os.environ.get("API_URL", "").rstrip("/")
-API_AUTH_TOKEN = os.environ.get("API_AUTH_TOKEN", "")
-
 
 def _run_inference() -> dict:
-    if API_URL:
-        headers = {"X-API-Key": API_AUTH_TOKEN} if API_AUTH_TOKEN else {}
-        resp = requests.get(f"{API_URL}/forecast", headers=headers, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        if isinstance(data, dict) and "error" in data and "forecast" not in data:
-            raise RuntimeError(data["error"])
-        return data
-    # Run local inference when no API URL is set.
+    # Single-tier architecture: always run inference in-process (reads Hopsworks
+    # directly, loads the model, computes SHAP). No Flask API involved.
     from src.pipelines import inference_pipeline
 
     return inference_pipeline.run()
@@ -70,18 +58,6 @@ MODEL_DISPLAY_NAMES = {
 
 @st.cache_data(ttl=600)
 def load_daily_history():
-    if API_URL:
-        try:
-            headers = {"X-API-Key": API_AUTH_TOKEN} if API_AUTH_TOKEN else {}
-            resp = requests.get(f"{API_URL}/history", headers=headers, timeout=30)
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data, list) and data:
-                    df = pd.DataFrame(data)
-                    df["date"] = pd.to_datetime(df["date"])
-                    return df.sort_values("date").reset_index(drop=True)
-        except Exception:
-            pass
     try:
         store = get_feature_store()
         df = store.read(config.DAILY_FEATURES_FG)

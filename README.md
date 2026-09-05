@@ -1,5 +1,9 @@
 # Pearls AQI Predictor
 
+> **Branch: `streamlit-only-deployment`** — single-tier architecture, no separately-hosted
+> API. The Streamlit dashboard runs inference in-process. For the two-tier setup (Flask API
+> on Render + Streamlit dashboard calling it over HTTP), see the `master` branch.
+
 See **[REPORT.md](REPORT.md)** for the detailed project report (architecture, methodology,
 results, limitations) — that's the submission deliverable; this README is the setup/usage guide.
 
@@ -40,7 +44,7 @@ OpenWeather API ▶│  (hourly, GH       │        │ (local parquet, or    �
                                                             │
                                                  ┌──────────▼───────────┐
                                                  │  Streamlit Dashboard  │
-                                                 │  (+ Flask API, local) │
+                                                 │  (in-process inference)│
                                                  └───────────────────────┘
 ```
 
@@ -127,24 +131,8 @@ python -m src.pipelines.inference_pipeline      # prints the forecast as JSON
 pytest tests/ -v
 ```
 
-Covers the EPA AQI calculator, the feature engineering functions, and the Flask API — pure
-functions plus a couple of endpoint tests, no live AQICN/OpenWeather calls required for most of
-the suite.
-
-## Flask API
-
-Alongside the Streamlit dashboard, a small Flask API exposes the same forecast as JSON:
-
-```bash
-python -m api.app
-curl http://localhost:5000/health
-curl http://localhost:5000/forecast
-curl http://localhost:5000/history
-```
-
-Set `API_AUTH_TOKEN` in `.env` to require an `X-API-Key` header on `/forecast` and `/history` —
-leave it unset and the API stays open, which is fine for local use but worth turning on before
-exposing this anywhere public.
+Covers the EPA AQI calculator and the feature engineering functions — pure functions, no live
+AQICN/OpenWeather calls required.
 
 ## Filling in the report's results table
 
@@ -175,27 +163,18 @@ instead and those commit-back steps are no-ops.
 
 ## Deploying this
 
-The dashboard deploys on its own — no separate backend to stand up. `dashboard/app.py` already
-knows how to run inference in-process (read Hopsworks, load the model, compute SHAP) whenever no
-`API_URL` is configured, which is exactly what you want for a single free deployment. Push to
-GitHub, create a new app on [Streamlit Community Cloud](https://streamlit.io/cloud) pointed at
-`dashboard/app.py`, and paste the Hopsworks/city values from `.env` into its Secrets panel —
+Single-tier, one service, no separate backend to stand up. `dashboard/app.py` runs inference
+in-process — reads Hopsworks directly, loads the model, computes SHAP — so there's nothing else
+to host. Push to GitHub, create a new app on
+[Streamlit Community Cloud](https://streamlit.io/cloud) pointed at `dashboard/app.py`, and paste
+the Hopsworks/city values from `.streamlit/secrets.toml.example` into its Secrets panel.
 `dashboard/requirements.txt` (co-located with the entrypoint, so Streamlit Cloud picks it up
 automatically instead of the root `requirements.txt`) has everything the dashboard needs on its
-own, including a working fallback to reading Hopsworks directly if you ever do point it at a
-separate API and that call fails.
+own — no Flask, no `requests`, no gunicorn.
 
-We looked at also hosting `api/app.py` publicly — Streamlit as a thin client, Flask doing the
-actual work behind it — and the dashboard already supports that mode too, via an `API_URL`
-secret. Render was the natural host for it (an always-on process, no execution-time limit, which
-matches `gunicorn` cleanly), but its free tier started asking for a credit card partway through
-setting this up. Vercel doesn't need one, but its free functions cap out at 10 seconds by
-default, and `/forecast` — which computes SHAP explanations live for all three horizons — took
-about 20 seconds in testing. It would time out far more often than it would succeed, so we left
-it alone rather than ship something that fails most of the time. The real fix, if a live,
-separately-hosted API turns out to matter more later, is to precompute SHAP once during the
-daily training run instead of on every request; `api/app.py` runs fine locally in the meantime
-(`python -m api.app`), fully tested, just not sitting on a public URL.
+The `master` branch has the alternate two-tier design (Flask API on Render, Streamlit as a thin
+client calling it over HTTP via an `API_URL` secret) if a separately-hosted API turns out to
+matter more later.
 
 ## Project structure
 
@@ -213,11 +192,10 @@ src/pipelines/
   daily_aggregation.py              # raw hourly -> daily features + targets
   training_pipeline.py              # baseline / Ridge / RF / TF MLP per horizon, picks best
   inference_pipeline.py             # latest features -> 3-day forecast + SHAP
-dashboard/app.py                   # Streamlit UI (in-process inference, or proxies to api/app.py)
+dashboard/app.py                   # Streamlit UI (in-process inference only — no Flask API)
 dashboard/requirements.txt         # dashboard-only deps, picked up by Streamlit Cloud automatically
-api/app.py                         # Flask REST API (/health, /forecast, /history)
 .github/workflows/                 # hourly + daily automation
-tests/                             # unit tests + API tests
+tests/                             # unit tests
 scripts/                           # local dev convenience scripts + report metrics generator
 ```
 
@@ -230,7 +208,5 @@ scripts/                           # local dev convenience scripts + report metr
 - **Alerts via email/Slack**: `src/utils/alerts.py` already computes
   whether a hazard threshold is breached — wire its output into a
   notification call at the end of `inference_pipeline.run()`.
-- **Hosting the Flask API publicly**: see the deployment note above — move SHAP computation into
-  the training run and store the result alongside the model instead of computing it live on
-  every request. That alone should bring `/forecast` well under a 10-second budget, which opens
-  up hosts like Vercel that a long-running `gunicorn` process doesn't fit today.
+- **A separately-hosted API**: this branch is single-tier by design. See the `master` branch for
+  the Flask API (`api/app.py`) and its Render deployment config (`render.yaml`).

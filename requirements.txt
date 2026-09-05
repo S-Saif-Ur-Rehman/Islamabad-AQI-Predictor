@@ -1,6 +1,6 @@
 # Core app and data tools
-flask>=3.0.0
-gunicorn>=22.0.0
+# (No Flask/gunicorn on this branch — single-tier streamlit-only architecture,
+# no separately-hosted API. See the `master` branch for the render+streamlit setup.)
 requests>=2.31.0
 python-dotenv>=1.0.0
 pyyaml>=6.0.1

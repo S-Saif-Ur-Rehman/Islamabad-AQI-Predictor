@@ -1,7 +1,8 @@
 # Dashboard-only dependencies.
 # This file is used when deploying the Streamlit app.
 # It keeps the install lean and skips TensorFlow and Flask.
-requests>=2.31.0
+# No `requests` needed on this branch — the dashboard never calls an external API,
+# it runs inference in-process against Hopsworks directly.
 python-dotenv>=1.0.0
 pandas>=2.1.0,<2.4.0
 numpy>=1.26.3,<2.0.0
