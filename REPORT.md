@@ -210,24 +210,28 @@ both persist state on their own.
   distribution, AQI-vs-weather scatterplots with OLS trendlines, feature correlation heatmap).
   Nothing runs until the user clicks "Generate Forecast" — SHAP computation takes up to ~30
   seconds, so it shouldn't fire silently on every page load.
-- **Flask API** (`api/app.py`) — `/health`, `/history`, and `/forecast` (`/predict` alias),
-  returning the same data the dashboard shows as JSON. Built specifically to cover Flask as a
-  named required technology beyond just Streamlit, and to make the forecast consumable outside
-  the dashboard.
+- **Flask API** (`api/app.py`, `master` branch only) — `/health`, `/history`, and `/forecast`
+  (`/predict` alias), returning the same data the dashboard shows as JSON. Built specifically to
+  cover Flask as a named required technology beyond just Streamlit, and to make the forecast
+  consumable outside the dashboard.
 
-**On deployment:** the dashboard deploys standalone to Streamlit Community Cloud, running
-inference in-process rather than calling a separate backend. `dashboard/app.py` also supports a
-two-tier mode — Streamlit as a thin client, Flask doing the actual inference behind an `API_URL`
-— and that code path is built and tested, but it isn't the live setup. The plan had been to host
-`api/app.py` on Render, which fits it well (an always-on process, no execution-time limit, which
-is what `gunicorn` expects), but Render's free tier started asking for a credit card partway
-through setup, which wasn't available. Vercel doesn't need a card, but its free functions cap
-execution at 10 seconds by default, and `/forecast` — which computes SHAP live for all three
-horizons — took roughly 20 seconds in testing. Deploying as-is would fail more often than it
-would succeed, so it was left as a documented next step rather than shipped broken: move SHAP
-computation into the daily training run and store the result instead of recomputing it on every
-request, which would bring `/forecast` well under any serverless time budget. `api/app.py` runs
-correctly and is tested (`tests/`) — it's just not sitting on a public URL right now.
+**Two deployment branches, not one config flag.** The repo splits into `master` (two-tier: the
+Flask API above, deployed as its own service, with the dashboard calling it over HTTP) and
+`streamlit-only-deployment` (single-tier: the dashboard runs inference in-process, no separate
+API at all). Both are fully built and tested. The split exists because an earlier single-codebase
+version toggled between the two modes on an `API_URL` config flag — which worked, but left Flask
+code, `render.yaml`, and an HTTP client sitting unused on whichever deployment never touched them.
+Two real branches make each one a minimal, honest reflection of the architecture it actually
+runs, with everything upstream of the web layer (feature pipeline through SHAP) identical on
+both. See `README.md`'s "Two deployment branches" section for the full reasoning and the deploy
+steps for each.
+
+On `master`, `api/app.py` deploys via the included `render.yaml` blueprint on
+[Render](https://render.com) — an always-on process with no execution-time limit, which fits
+`gunicorn` and `/forecast`'s ~20-second live SHAP computation cleanly (a stricter-timeout
+serverless host like Vercel's free tier would time out on that call most of the time; that's
+why Render, not Vercel, backs this branch). On `streamlit-only-deployment`, there's nothing to
+host beyond the Streamlit app itself.
 
 ## 8. Security & robustness
 
@@ -294,9 +298,12 @@ silently pointing at the wrong day.
 - **Recursive multi-step forecasting was not used** — each horizon (1d/2d/3d) is a separately
   trained "direct" model rather than a single model forecasting step-by-step. This avoids
   compounding one-step errors across the 3-day window, at the cost of training 3x the models.
-- **The Flask API isn't publicly hosted** (see §7) — the fix is understood (precompute SHAP
-  during training instead of at request time) but not yet built. Worth doing if a live,
-  separately-hosted API becomes more important than it is right now.
+- **`/forecast` computes SHAP live, which bounds how it can be hosted** — on `master`, that's
+  why the Flask API deploys to Render (no execution-time limit) rather than a stricter-timeout
+  serverless host. Precomputing SHAP during the daily training run instead of on every request
+  is the fix if a tighter time budget ever matters; not yet built.
+- **The single-tier branch (`streamlit-only-deployment`) has no separately-hosted API at all**
+  — by design, not as a limitation to fix. See §7 and `README.md` for why both exist.
 
 ## 13. How to run this
 
