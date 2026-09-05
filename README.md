@@ -1,13 +1,17 @@
 # Pearls AQI Predictor
 
 Serverless, end-to-end AQI forecasting: hourly feature collection, daily model training, and a
-Streamlit dashboard that predicts your city's AQI for the next 3 days — with SHAP explanations
+Streamlit dashboard that predicts your city's AQI for the next 3 days, with SHAP explanations
 and hazard alerts.
 
-See **[REPORT.md](REPORT.md)** for the detailed project report (architecture, methodology,
-results, limitations) — that's the submission deliverable; this README is the setup/usage guide.
+**Live app:** https://islamabad-aqipredictor.streamlit.app/, currently running the single-tier
+`streamlit-only-deployment` branch described below. The two-tier `master` branch, with a Flask
+API on Render, is built and tested but not deployed yet.
 
-**This README is identical on every branch of this repo.** It describes both deployment
+See **[REPORT.md](REPORT.md)** for the detailed project report (architecture, methodology,
+results, limitations). That's the submission deliverable; this README is the setup/usage guide.
+
+This README is identical on every branch of this repo. It describes both deployment
 architectures the project ships; see [Two deployment branches](#two-deployment-branches) for
 which one you're looking at right now and how the two relate.
 
@@ -63,9 +67,9 @@ OpenWeather API ▶│  (hourly, GH       │        │ (local parquet, or    �
                                                  └───────────────────────┘
 ```
 
-Everything from the feature pipeline through SHAP explanations is **identical on every branch**.
-The only thing that differs is the last box — how the web layer is deployed — which is covered
-in full below.
+Everything from the feature pipeline through SHAP explanations is identical on every branch. The
+only thing that differs is the last box: how the web layer is deployed. That's covered in full
+below.
 
 Every "feature store" and "model registry" call goes through a small interface
 (`src/feature_store/base.py`, `src/models/model_registry.py`) with two implementations each:
@@ -75,7 +79,7 @@ Every "feature store" and "model registry" call goes through a small interface
 | Feature store | `data/local_store/*.parquet` | Hopsworks Feature Groups + a Feature View for training |
 | Model registry | `models_registry/*` (joblib/keras + JSON metadata) | Hopsworks Model Registry |
 
-This project actually runs against Hopsworks — `USE_HOPSWORKS=true` in the real `.env`, feature
+This project actually runs against Hopsworks. `USE_HOPSWORKS=true` in the real `.env`, feature
 groups populated with two years of Islamabad data, models trained and registered there. The
 local backend still works fine on its own if you'd rather not set up an account before poking
 around: flip `USE_HOPSWORKS=false` and everything runs against parquet files on disk instead, no
@@ -83,38 +87,42 @@ code changes needed either way. Hopsworks itself is free at https://app.hopswork
 
 ## Two deployment branches
 
-This repo ships **two working deployment architectures**, each on its own branch, rather than
+This repo ships two working deployment architectures, each on its own branch, rather than
 picking just one:
 
 | Branch | Architecture | Web layer |
 |---|---|---|
-| **`master`** | Two-tier | `api/app.py` (Flask) serves the forecast as JSON; `dashboard/app.py` is a thin client that calls it over HTTP. Deployed via `render.yaml` (Render) + Streamlit Community Cloud. |
-| **`streamlit-only-deployment`** | Single-tier | `dashboard/app.py` runs inference in-process — reads Hopsworks directly, loads the model, computes SHAP. No `api/app.py`, no `render.yaml`, nothing else to host. |
+| **`master`** | Two-tier | `api/app.py` (Flask) serves the forecast as JSON; `dashboard/app.py` is a thin client that calls it over HTTP. Built to deploy via `render.yaml` (Render) + Streamlit Community Cloud; the Render side isn't live yet. |
+| **`streamlit-only-deployment`** | Single-tier | `dashboard/app.py` runs inference in-process: reads Hopsworks directly, loads the model, computes SHAP. No `api/app.py`, no `render.yaml`, nothing else to host. |
 
-**Why this exists at all:** the project brief names Flask as a required technology alongside
-Streamlit. The two-tier branch (`master`) satisfies that literally — Flask running as its own
-hosted service, not just imported and left idle. The single-tier branch exists because a
-separately-hosted API is one more moving part than a forecasting dashboard strictly needs, and
-because it's a fair question whether a grader or a future maintainer would rather see the leaner
-version. Building both, on two branches, means neither answer had to be picked in advance.
+#### Why this exists at all
 
-**Why two branches instead of one config toggle.** Early on, `dashboard/app.py` supported both
-modes in a single file, switching on whether an `API_URL` secret was set. That worked, but every
-checkout carried Flask, `render.yaml`, and the HTTP-client code path regardless of which way it
-was actually being deployed — dead weight on whichever branch never uses it, and a runtime flag
-standing in for what's really an architectural decision. Splitting them into two real branches
-makes each one a complete, honest, minimal reflection of the architecture it deploys: everything
-in `master` is either running or directly deployment config for the two-tier setup; same for
-`streamlit-only-deployment` and the single-tier one.
+The project brief names Flask as a required technology alongside Streamlit. The two-tier branch
+(`master`) satisfies that literally: Flask runs as its own hosted service, not just imported and
+left idle. The single-tier branch exists because a separately-hosted API is one more moving part
+than a forecasting dashboard strictly needs, and because it's a fair question whether a grader or
+a future maintainer would rather see the leaner version. Building both, on two branches, means
+neither answer had to be picked in advance.
+
+#### Why two branches instead of one config toggle
+
+Early on, `dashboard/app.py` supported both modes in a single file, switching on whether an
+`API_URL` secret was set. That worked, but every checkout carried Flask, `render.yaml`, and the
+HTTP-client code path regardless of which way it was actually being deployed. That's dead weight
+on whichever branch never uses it, and a runtime flag standing in for what's really an
+architectural decision. Splitting them into two real branches makes each one a complete, minimal
+reflection of the architecture it deploys: everything in `master` is either running or directly
+deployment config for the two-tier setup, and the same is true of `streamlit-only-deployment`
+for the single-tier one.
 
 **How to treat them:**
 - `master` is the default branch, and the one this README and `REPORT.md` primarily describe.
-- Check out `streamlit-only-deployment` for the simpler, single-service alternative — same
+- Check out `streamlit-only-deployment` for the simpler, single-service alternative: same
   pipelines, same models, same dashboard UI, just without a separately-hosted API.
-- Everything upstream of the web layer — feature pipeline, backfill, daily aggregation, training,
-  inference, SHAP, GitHub Actions automation — is identical on both branches. Changes there
-  should land on one branch and get merged or cherry-picked into the other, so the two don't
-  drift apart on anything but the web layer.
+- Everything upstream of the web layer (feature pipeline, backfill, daily aggregation, training,
+  inference, SHAP, GitHub Actions automation) is identical on both branches. Changes there should
+  land on one branch and get merged or cherry-picked into the other, so the two don't drift apart
+  on anything but the web layer.
 - `git branch --show-current` shows which one you have checked out.
   `git diff master streamlit-only-deployment` shows exactly what differs in practice:
   `api/app.py`, `render.yaml`, `tests/test_api.py`, a handful of lines in `dashboard/app.py`
@@ -122,28 +130,23 @@ in `master` is either running or directly deployment config for the two-tier set
 
 ## Data sources
 
-- **AQICN** (https://aqicn.org) — live, ground-truth AQI reading for your
-  city (US EPA 0-500 scale) plus pollutant sub-indices. Free token:
-  https://aqicn.org/data-platform/token/
-- **OpenWeather** (https://openweathermap.org) — current + forecast
-  weather, current + *historical* pollutant concentrations. Free key:
-  https://home.openweathermap.org/api_keys
-- **Open-Meteo** (https://open-meteo.com) — free historical weather
-  archive, **no API key required**. Used only during backfill, to fill the
-  gap OpenWeather's free tier leaves for historical weather.
+- **AQICN** (https://aqicn.org): live, ground-truth AQI reading for your city (US EPA 0-500
+  scale) plus pollutant sub-indices. Free token: https://aqicn.org/data-platform/token/
+- **OpenWeather** (https://openweathermap.org): current + forecast weather, current +
+  *historical* pollutant concentrations. Free key: https://home.openweathermap.org/api_keys
+- **Open-Meteo** (https://open-meteo.com): free historical weather archive, no API key required.
+  Used only during backfill, to fill the gap OpenWeather's free tier leaves for historical
+  weather.
 
 ## Why the backfilled AQI is an *estimate*
 
-AQICN's free tier has no bulk-historical endpoint, so days before you
-started running the hourly pipeline don't have an exact AQICN reading.
-`backfill_pipeline.py` reconstructs an approximate AQI from OpenWeather's
-historical PM2.5/PM10 concentrations using the standard EPA breakpoint
-formula (`src/features/aqi_calculator.py`). This is a genuine EPA
-methodology, but it only considers PM2.5/PM10 (see that file's docstring
-for why). Live rows collected by the hourly pipeline use AQICN's real,
-full AQI directly and are strictly more trustworthy — the backfill just
-gets you enough training history to not have to wait weeks before your
-first model.
+AQICN's free tier has no bulk-historical endpoint, so days before you started running the hourly
+pipeline don't have an exact AQICN reading. `backfill_pipeline.py` reconstructs an approximate
+AQI from OpenWeather's historical PM2.5/PM10 concentrations using the standard EPA breakpoint
+formula (`src/features/aqi_calculator.py`). This is a genuine EPA methodology, but it only
+considers PM2.5/PM10 (see that file's docstring for why). Live rows collected by the hourly
+pipeline use AQICN's real, full AQI directly and are strictly more trustworthy. The backfill just
+gets you enough training history so you don't have to wait weeks before your first model.
 
 ## Getting started
 
@@ -155,7 +158,7 @@ source .venv/bin/activate
 ```
 
 Works the same on either branch. `setup_local_dev.sh` installs both `requirements.txt` and
-`dashboard/requirements.txt` plus pytest — the project's dependencies are split by deployment
+`dashboard/requirements.txt` plus pytest. The project's dependencies are split by deployment
 target (see below), so full local dev needs both files together.
 
 Edit `.env`:
@@ -191,10 +194,10 @@ curl http://localhost:5000/forecast
 curl http://localhost:5000/history
 ```
 
-Set `API_AUTH_TOKEN` in `.env` to require an `X-API-Key` header on `/forecast` and `/history` —
-leave it unset and the API stays open, which is fine for local use but worth turning on before
-exposing this anywhere public. `streamlit-only-deployment` doesn't have `api/app.py` at all —
-the dashboard calls `inference_pipeline.run()` directly instead.
+Set `API_AUTH_TOKEN` in `.env` to require an `X-API-Key` header on `/forecast` and `/history`.
+Leave it unset and the API stays open, which is fine for local use but worth turning on before
+exposing this anywhere public. `streamlit-only-deployment` doesn't have `api/app.py` at all; the
+dashboard calls `inference_pipeline.run()` directly instead.
 
 ## Tests
 
@@ -202,7 +205,7 @@ the dashboard calls `inference_pipeline.run()` directly instead.
 pytest tests/ -v
 ```
 
-Covers the EPA AQI calculator and the feature engineering functions on both branches — pure
+Covers the EPA AQI calculator and the feature engineering functions on both branches: pure
 functions, no live AQICN/OpenWeather calls required. `master` additionally includes
 `tests/test_api.py` for the Flask endpoints; `streamlit-only-deployment` doesn't have it, since
 there's no API to test there.
@@ -224,16 +227,16 @@ Paste its output into the Results section of `REPORT.md`.
    - **Secrets**: `AQICN_API_TOKEN`, `OPENWEATHER_API_KEY`, and `HOPSWORKS_API_KEY`.
    - **Variables**: `CITY_NAME`, `LATITUDE`, `LONGITUDE`, `AQICN_CITY_SLUG`,
      `USE_HOPSWORKS` (`true`/`false`), `HOPSWORKS_PROJECT_NAME`.
-3. That's it — `.github/workflows/feature_pipeline.yml` runs hourly and
+3. That's it: `.github/workflows/feature_pipeline.yml` runs hourly and
    `.github/workflows/training_pipeline.yml` runs daily. Both can also be
    triggered manually from the **Actions** tab (`workflow_dispatch`). These workflows are
-   identical on both branches — they only touch the pipeline, never the web layer.
+   identical on both branches; they only touch the pipeline, never the web layer.
 
 While `USE_HOPSWORKS=false`, both workflows commit the updated
 `data/local_store/` / `models_registry/` files back into the repo after
-each run — that's how state survives between otherwise-stateless Actions
-runs. With Hopsworks enabled (the actual setup here), storage lives there
-instead and those commit-back steps are no-ops.
+each run, since GitHub Actions runners start from a clean checkout every time and would
+otherwise "forget" all prior runs. With Hopsworks enabled (the actual setup here), storage lives
+there instead and those commit-back steps are no-ops.
 
 ## Deploying this
 
@@ -244,16 +247,16 @@ instead and those commit-back steps are no-ops.
    branch. It reads `render.yaml` and builds the Flask API as a web service
    (`gunicorn api.app:app`). Fill in the secrets marked `sync: false`
    (`HOPSWORKS_API_KEY`, `HOPSWORKS_PROJECT_NAME`, `AQICN_API_TOKEN`, `OPENWEATHER_API_KEY`,
-   `API_AUTH_TOKEN`) in Render's Environment tab after the first deploy — they're never read
+   `API_AUTH_TOKEN`) in Render's Environment tab after the first deploy; they're never read
    from `render.yaml` itself.
 3. On [Streamlit Community Cloud](https://streamlit.io/cloud): new app pointed at
    `dashboard/app.py` on `master`. Paste the values from `.streamlit/secrets.toml.example` into
    its Secrets panel, including `API_URL` set to the Render service's URL and a matching
    `API_AUTH_TOKEN`.
 
-Render is a natural host for the Flask side — an always-on process with no execution-time limit,
+Render is a natural host for the Flask side: an always-on process with no execution-time limit,
 which matches `gunicorn` and `/forecast`'s ~20-second live SHAP computation cleanly. Some
-account setups on Render's free tier ask for a card before a web service will deploy; that's the
+account setups on Render's free tier ask for a card before a web service will deploy. That's the
 tradeoff this branch takes on in exchange for demonstrating Flask as a real, separately-hosted
 service rather than just imported code.
 
@@ -261,11 +264,11 @@ service rather than just imported code.
 
 1. Push the `streamlit-only-deployment` branch to GitHub.
 2. On Streamlit Community Cloud: new app pointed at `dashboard/app.py` on
-   `streamlit-only-deployment`. Paste the values from `.streamlit/secrets.toml.example` — no
+   `streamlit-only-deployment`. Paste the values from `.streamlit/secrets.toml.example`; no
    `API_URL` needed, since there's nothing to call.
 3. `dashboard/requirements.txt` (co-located with the entrypoint, so Streamlit Cloud picks it up
    automatically instead of the root `requirements.txt`) has everything this branch's dashboard
-   needs — no Flask, no `requests`, no gunicorn.
+   needs: no Flask, no `requests`, no gunicorn.
 
 This branch sidesteps the Render tradeoff entirely, at the cost of not having Flask running
 anywhere as its own service.
@@ -288,7 +291,7 @@ src/pipelines/
   inference_pipeline.py             # latest features -> 3-day forecast + SHAP
 dashboard/app.py                   # Streamlit UI
 dashboard/requirements.txt         # dashboard-only deps, picked up by Streamlit Cloud automatically
-.streamlit/secrets.toml.example    # secrets template — content differs per branch, see above
+.streamlit/secrets.toml.example    # secrets template, content differs per branch (see above)
 .github/workflows/                 # hourly + daily automation (identical on both branches)
 tests/                             # unit tests
 scripts/                           # local dev convenience scripts + report metrics generator
@@ -305,13 +308,13 @@ tests/test_api.py                  # Flask endpoint tests
 ## Extending this
 
 - **More models**: add another branch in `train_horizon()` in
-  `training_pipeline.py` — it already picks whichever model scores lowest
+  `training_pipeline.py`. It already picks whichever model scores lowest
   RMSE, so a new candidate just needs to return `{"model", "metrics",
   "is_keras"}` in the same `results` dict.
 - **Alerts via email/Slack**: `src/utils/alerts.py` already computes
-  whether a hazard threshold is breached — wire its output into a
+  whether a hazard threshold is breached; wire its output into a
   notification call at the end of `inference_pipeline.run()`.
 - **Faster `/forecast` on `master`**: precompute SHAP once during the daily training run and
   store it alongside the model, instead of computing it live on every request. `/forecast`
-  currently takes ~20 seconds because of live SHAP computation — fine on Render (no
-  execution-time limit) but would rule out stricter-timeout serverless hosts.
+  currently takes ~20 seconds because of live SHAP computation. Fine on Render (no
+  execution-time limit), but it would rule out stricter-timeout serverless hosts.
