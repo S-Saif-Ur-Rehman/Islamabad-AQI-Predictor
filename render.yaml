@@ -1,0 +1,42 @@
+# Render Blueprint for the AQI Predictor Flask API (two-tier deployment).
+#
+# This service is the "render" half of the render+streamlit architecture on this branch.
+# The Streamlit dashboard (deployed separately on Streamlit Community Cloud) talks to it
+# over HTTP via API_URL — see .streamlit/secrets.toml.example.
+#
+# Deploy: Render dashboard -> New -> Blueprint -> point at this repo/branch.
+# Secrets marked `sync: false` must be filled in manually in the Render dashboard
+# (Environment tab) after the first deploy — they are never read from this file.
+
+services:
+  - type: web
+    name: aqi-predictor-api
+    runtime: python
+    plan: free
+    branch: master
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn api.app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: USE_HOPSWORKS
+        value: "true"
+      - key: CITY_NAME
+        value: Islamabad
+      - key: LATITUDE
+        value: "33.6844"
+      - key: LONGITUDE
+        value: "73.0479"
+      - key: AQICN_CITY_SLUG
+        value: pakistan/islamabad/us-embassy
+      - key: HOPSWORKS_PROJECT_NAME
+        sync: false
+      - key: HOPSWORKS_API_KEY
+        sync: false
+      - key: AQICN_API_TOKEN
+        sync: false
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      - key: API_AUTH_TOKEN
+        sync: false
