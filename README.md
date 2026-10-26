@@ -4,7 +4,6 @@ Serverless, end-to-end AQI forecasting: hourly feature collection, daily model t
 Streamlit dashboard that predicts your city's AQI for the next 3 days, with SHAP explanations
 and hazard alerts.
 
-**Live app:** https://islamabad-aqipredictor.streamlit.app/, currently running the single-tier
 `streamlit-only-deployment` branch described below. The two-tier `master` branch, with a Flask
 API on Render, is built and tested but not deployed yet.
 
